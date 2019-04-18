@@ -1,0 +1,6 @@
+*.out
+*.log
+data.txt
+
+.vscode
+.vscode/*
