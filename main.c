@@ -20,10 +20,23 @@
 
 //defines
 #define NUM_TICKS 1000 //Number of ticks
+#ifdef F2
+#define MM_Dist matchmaking_dist_f2
+#else
+#define MM_Dist matchmaking_dist_f1
+#endif
+typedef struct Player {
+  int mmr;
+  unsigned int ping;
+  int true_mmr;
+} Player;
 
 //Global vars
+unsigned int total_players = 1000; //1,000
 
 //Function declarations
+float matchmaking_dist_f1();
+void input_number(int in);
 
 //Main
 int main(int argc, char ** argv) {
@@ -80,3 +93,22 @@ int main(int argc, char ** argv) {
 }
 
 //Other functions here
+
+//distance function
+float matchmaking_dist_f1() {
+  return 0.0;
+}
+
+void input_number(int in) {
+  switch(in) {
+    case 1:
+      total_players = 10000; //10,000
+      break;
+    case 2:
+      total_players = 100000; //100,000
+      break;
+    case 3:
+      total_players = 1000000; //1,000,000
+      break;
+  }
+}
