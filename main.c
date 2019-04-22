@@ -20,6 +20,7 @@
 
 //defines
 #define NUM_TICKS 1000 //Number of ticks
+#define GAME_LENGTH 5 //Number of ticks per game
 
 #ifdef ELO
 #define MM_Dist matchmaking_dist_elo
@@ -27,14 +28,19 @@
 #define nextmmr next_mmr_elo
 #else
 #define MM_Dist matchmaking_dist_trueskill
-#define START_MMR 0 //CHANGE THIS
+#define START_MMR 2500
 #define nextmmr next_mmr_trueskill
 #endif
 
+#define START_UNCERT 830
+
 typedef struct Player {
   int mmr;
+  unsigned int uncertainty;
   unsigned int ping;
   int true_mmr;
+  float lenience;
+  int playing;
 } Player;
 
 //Global vars
@@ -76,9 +82,12 @@ int main(int argc, char ** argv) {
   //init
   srand48(mpi_rank);
   for(int i = 0; i < total_players / mpi_size; ++i) {
-    player_arr[i].ping      = nextping();
-    player_arr[i].mmr       = START_MMR;
-    player_arr[i].true_mmr  = nextmmr();
+    player_arr[i].ping        = nextping();
+    player_arr[i].mmr         = START_MMR;
+    player_arr[i].uncertainty = START_UNCERT;
+    player_arr[i].true_mmr    = nextmmr();
+    player_arr[i].playing     = 0; //not playing
+    player_arr[i].lenience    = 1.0; //initial lenience
   }
 
   //Report setup time
@@ -152,7 +161,7 @@ int next_mmr_elo() {
 }
 
 int next_mmr_trueskill() {
-  return (int) gaussian(TODO, START_MMR);
+  return (int) gaussian(START_UNCERT, START_MMR);
 }
 
 unsigned int nextping() {
