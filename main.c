@@ -34,6 +34,9 @@
 
 #define START_UNCERT 830
 
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
+
 typedef struct Player {
   int mmr;
   unsigned int uncertainty;
@@ -41,6 +44,8 @@ typedef struct Player {
   int true_mmr;
   float lenience;
   int playing;
+  int group_size;
+  int group_leader;
 } Player;
 
 //Global vars
@@ -53,6 +58,7 @@ void input_number(int in);
 int next_mmr_elo();
 int next_mmr_trueskill();
 unsigned int nextping();
+float playerDistance(Player p1, Player p2);
 
 //Main
 int main(int argc, char ** argv) {
@@ -77,11 +83,22 @@ int main(int argc, char ** argv) {
     start_time = GetTimeBase();
   }
 
+
+  // setup
+  float threshold = 1.0;
+  total_players = 1024;
+  int MAX_RANK_PLAYERS = total_players / mpi_size;
+  int N_EXCHANGE_PLAYERS = MAX_RANK_PLAYERS/8;
+  int N_RANK_PLAYERS = 6*N_EXCHANGE_PLAYERS;
+  int GAME_PLAYERS = 2;
+  int GAME_LENGTH = 5;
+  int N_EXCHANGED;
+
   //Alloc memory
-  Player * player_arr = malloc(sizeof(Player) * total_players / mpi_size);
+  Player * player_arr = malloc(sizeof(Player) * MAX_RANK_PLAYERS);
   //init
   srand48(mpi_rank);
-  for(int i = 0; i < total_players / mpi_size; ++i) {
+  for(int i = 0; i < MAX_RANK_PLAYERS; ++i) {
     player_arr[i].ping        = nextping();
     player_arr[i].mmr         = START_MMR;
     player_arr[i].uncertainty = START_UNCERT;
@@ -89,7 +106,17 @@ int main(int argc, char ** argv) {
     player_arr[i].playing     = 0; //not playing
     player_arr[i].lenience    = 1.0; //initial lenience
   }
-
+  // initialize player distance
+  float **distance = malloc(sizeof(float*)*MAX_RANK_PLAYERS);
+  for (int i = 0; i < MAX_RANK_PLAYERS; i++) {
+    distance[i] = malloc(sizeof(float)*MAX_RANK_PLAYERS);
+  }
+  for (int p = 0; p < MAX_RANK_PLAYERS; p++) {
+    for (int j = p+1; j < MAX_RANK_PLAYERS; j++) {
+      distance[p][j] = playerDistance(player_arr[p], player_arr[j]);
+    }
+  }
+  
   //Report setup time
   if(mpi_rank == 0) {
     setup_time = GetTimeBase() - start_time;
@@ -97,9 +124,34 @@ int main(int argc, char ** argv) {
   }
   MPI_Barrier(MPI_COMM_WORLD);
   for(int i = 0; i < NUM_TICKS; ++i) {
-    //Exchange data
+    // try to match players not in a match
+    for (int p = 0; p < MAX_RANK_PLAYERS-1; p++) {
+      if (player_arr[p].playing > 0) {
+        continue;
+      }
+      for (int j = p+1; j < MAX_RANK_PLAYERS; j++) {
+        if (player_arr[j].playing > 0) {
+          continue;
+        }
+        // if (match()) {
+        //   // match players
+        //   player_arr[p].group;
+        // 
+        // 
+        //   // start game
+        //   // player_arr[p].playing = GAME_LENGTH;
+        //   // player_arr[j].playing = GAME_LENGTH;
+        // }
+      }
+    }
+    
+    // for (int i = 0; i < MAX_RANK_PLAYERS; i++) {
+    // 
+    // }
+    // increase threshold for each unmatched player
+    
 
-    //Run matchmaking algorithm
+    // exchange players at lower bound of each rank
 
     //Report statistics
     MPI_Barrier(MPI_COMM_WORLD);
@@ -122,6 +174,14 @@ int main(int argc, char ** argv) {
 
 //Other functions here
 
+float playerDistance(Player p1, Player p2) {
+  if (p1.mmr >= p2.mmr) {
+    return (float) p1.mmr - p2.mmr;
+  } else {
+    return (float) p2.mmr - p1.mmr;
+  }
+}
+
 //distance function
 float matchmaking_dist_elo() {
   return 0.0;
@@ -131,12 +191,14 @@ float matchmaking_dist_mmr() {
   return 0.0;
 }
 
-n2_cached = 0;
+int n2_cached = 0;
 double n2 = 0.0;
 float gaussian(float stdev, float mean) {
   //Normal distribution centered around 1200
   //With standard deviation 2000 / 7
   //https://stackoverflow.com/questions/19944111/creating-a-gaussian-random-generator-with-a-mean-and-standard-deviation
+  // static double n2 = 0.0;
+  // static int n2_cached = 0;
   if(!n2_cached) {
     double x, y, r;
     do {
@@ -149,7 +211,7 @@ float gaussian(float stdev, float mean) {
     n2 = y*d;
     double res = mean + n1 * stdev;
     n2_cached = 1;
-    return result;
+    return res;
   } else {
     n2_cached = 0;
     return mean + n2 * stdev;
@@ -166,7 +228,7 @@ int next_mmr_trueskill() {
 
 unsigned int nextping() {
   float g = gaussian(25, 50.0);
-  return max(1, (int) g);
+  return MAX(1, (int) g);
 }
 
 void input_number(int in) {
