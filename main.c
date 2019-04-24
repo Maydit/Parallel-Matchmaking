@@ -21,8 +21,8 @@
 #define ELO
 
 //defines
-#define NUM_TICKS 100 //Number of ticks
-#define GAME_LENGTH 2 //Number of ticks per game
+#define NUM_TICKS 10000 //Number of ticks
+#define GAME_LENGTH 20 //Number of ticks per game
 
 #ifdef ELO
 #define MM_update matchmaking_update_elo
@@ -36,7 +36,7 @@
 
 #define START_UNCERT 830
 #define MM_CONST 1.0f / 10.0f
-#define PING_CONST 1.0f / 100.0f
+#define PING_CONST 1.0f / 10.0f
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
@@ -286,6 +286,7 @@ void sort_players(Player * arr, int low, int high) {
 
 int matchable(Player a, Player b) {
   if(a.wait_time < 0 && b.wait_time < 0) {
+    //printf("leniences: %d, %d\n", a.lenience, b.lenience);
     if(a.lenience + b.lenience > MM_CONST * abs(a.mmr - b.mmr) + PING_CONST * (a.ping + b.ping)) return 1;
   }
   return 0;
@@ -296,16 +297,19 @@ void matchmaking_update_elo(Player * a, Player * b) {
   float qa = pow(10, a->true_mmr / 400.0f);
   float qb = pow(10, b->true_mmr / 400.0f);
   float ea = qa / (qa + qb);
-  int res = drand48() < ea;
+  float eb = qb / (qa + qb);
+  int res_a = drand48() < ea;
+  int res_b = !res_a;
   //update
   qa = pow(10, a->mmr / 400.0f);
   qb = pow(10, b->mmr / 400.0f);
   ea = qa / (qa + qb);
-  a->mmr = a->mmr + 32.0 * (res - ea);
-  b->mmr = b->mmr + 32.0 * (1 - (res - ea));
+  eb = qb / (qa + qb);
+  a->mmr = a->mmr + 32.0 * (res_a - ea);
+  b->mmr = b->mmr + 32.0 * (res_b - eb);
   //
-  a->wins += res;
-  b->wins += (1-res);
+  a->wins += res_a;
+  b->wins += res_b;
   a->games += 1;
   b->games += 1;
 }
