@@ -18,47 +18,57 @@
 #define GetTimeBase MPI_Wtime
 #endif
 
+#define ELO
+
 //defines
-#define NUM_TICKS 1000 //Number of ticks
-#define GAME_LENGTH 5 //Number of ticks per game
+#define NUM_TICKS 100 //Number of ticks
+#define GAME_LENGTH 2 //Number of ticks per game
 
 #ifdef ELO
-#define MM_Dist matchmaking_dist_elo
-#define START_MMR 1200
+#define MM_update matchmaking_update_elo
+#define START_MMR 1000
 #define nextmmr next_mmr_elo
 #else
-#define MM_Dist matchmaking_dist_trueskill
+#define MM_update matchmaking_update_trueskill
 #define START_MMR 2500
 #define nextmmr next_mmr_trueskill
 #endif
 
 #define START_UNCERT 830
+#define MM_CONST 1.0f / 10.0f
+#define PING_CONST 1.0f / 100.0f
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
+#define MPI_TAG_ANY 1
+
 typedef struct Player {
   int mmr;
-  unsigned int uncertainty;
-  unsigned int ping;
+  int uncertainty;
+  int ping;
   int true_mmr;
-  float lenience;
-  int playing;
-  int group_size;
-  int group_leader;
+  int wait_time; //time remaining
+  int wins; //games won
+  int games; //games played
+  int lenience;
 } Player;
 
 //Global vars
-unsigned int total_players = 1000; //1,000
+unsigned int total_players = 16; //1,024
 
 //Function declarations
-float matchmaking_dist_elo();
-float matchmaking_dist_trueskill();
 void input_number(int in);
 int next_mmr_elo();
 int next_mmr_trueskill();
 unsigned int nextping();
 float playerDistance(Player p1, Player p2);
+void matchmaking_update_elo(Player * a, Player * b);
+void matchmaking_update_trueskill(Player * a, Player * b);
+void sort_players(Player * arr, int low, int high);
+int matchable(Player a, Player b);
+
+void pretty_print_debug_player(FILE * f, Player a, int i);
 
 //Main
 int main(int argc, char ** argv) {
@@ -85,14 +95,13 @@ int main(int argc, char ** argv) {
 
 
   // setup
-  float threshold = 1.0;
   total_players = 1024;
   int MAX_RANK_PLAYERS = total_players / mpi_size;
-  int N_EXCHANGE_PLAYERS = MAX_RANK_PLAYERS/8;
-  int N_RANK_PLAYERS = 6*N_EXCHANGE_PLAYERS;
-  int GAME_PLAYERS = 2;
-  int GAME_LENGTH = 5;
-  int N_EXCHANGED;
+  int N_EXCHANGE_PLAYERS = MAX_RANK_PLAYERS / 8;
+
+  MPI_Datatype mpi_player_type;
+  MPI_Type_contiguous(8, MPI_INT, &mpi_player_type);
+  MPI_Type_commit(&mpi_player_type);
 
   //Alloc memory
   Player * player_arr = malloc(sizeof(Player) * MAX_RANK_PLAYERS);
@@ -103,20 +112,21 @@ int main(int argc, char ** argv) {
     player_arr[i].mmr         = START_MMR;
     player_arr[i].uncertainty = START_UNCERT;
     player_arr[i].true_mmr    = nextmmr();
-    player_arr[i].playing     = 0; //not playing
-    player_arr[i].lenience    = 1.0; //initial lenience
+    player_arr[i].lenience    = 1; //initial lenience
+    player_arr[i].wait_time   = -1; //not playing
+    player_arr[i].games       = 0;
+    player_arr[i].wins        = 0;
   }
-  // initialize player distance
-  float **distance = malloc(sizeof(float*)*MAX_RANK_PLAYERS);
-  for (int i = 0; i < MAX_RANK_PLAYERS; i++) {
-    distance[i] = malloc(sizeof(float)*MAX_RANK_PLAYERS);
-  }
-  for (int p = 0; p < MAX_RANK_PLAYERS; p++) {
-    for (int j = p+1; j < MAX_RANK_PLAYERS; j++) {
-      distance[p][j] = playerDistance(player_arr[p], player_arr[j]);
-    }
-  }
+  Player * ghost_arr_prev = malloc(sizeof(Player) * N_EXCHANGE_PLAYERS);
+  Player * ghost_arr_next = malloc(sizeof(Player) * N_EXCHANGE_PLAYERS);
   
+  MPI_Request * reqs_next_r = malloc(sizeof(MPI_Request) * N_EXCHANGE_PLAYERS);
+  MPI_Request * reqs_prev_r = malloc(sizeof(MPI_Request) * N_EXCHANGE_PLAYERS);
+  MPI_Request * reqs_next_s = malloc(sizeof(MPI_Request) * N_EXCHANGE_PLAYERS);
+  MPI_Request * reqs_prev_s = malloc(sizeof(MPI_Request) * N_EXCHANGE_PLAYERS);
+  MPI_Status  * stat_next   = malloc(sizeof(MPI_Status)  * N_EXCHANGE_PLAYERS);
+  MPI_Status  * stat_prev   = malloc(sizeof(MPI_Status)  * N_EXCHANGE_PLAYERS);
+
   //Report setup time
   if(mpi_rank == 0) {
     setup_time = GetTimeBase() - start_time;
@@ -124,37 +134,55 @@ int main(int argc, char ** argv) {
   }
   MPI_Barrier(MPI_COMM_WORLD);
   for(int i = 0; i < NUM_TICKS; ++i) {
-    // try to match players not in a match
-    for (int p = 0; p < MAX_RANK_PLAYERS-1; p++) {
-      if (player_arr[p].playing > 0) {
-        continue;
-      }
-      for (int j = p+1; j < MAX_RANK_PLAYERS; j++) {
-        if (player_arr[j].playing > 0) {
-          continue;
-        }
-        // if (match()) {
-        //   // match players
-        //   player_arr[p].group;
-        // 
-        // 
-        //   // start game
-        //   // player_arr[p].playing = GAME_LENGTH;
-        //   // player_arr[j].playing = GAME_LENGTH;
-        // }
+    //sort
+    sort_players(player_arr, 0, MAX_RANK_PLAYERS - 1);
+    //exchange
+    //send N_EXCHANGE_PLAYERS to prev
+    if(mpi_rank > 0) {
+      MPI_Isend(player_arr, N_EXCHANGE_PLAYERS, mpi_player_type, mpi_rank - 1, MPI_TAG_ANY, MPI_COMM_WORLD, &reqs_next_s[mpi_rank]); //send to prev
+      MPI_Irecv(ghost_arr_next, N_EXCHANGE_PLAYERS, mpi_player_type, mpi_rank - 1, MPI_TAG_ANY, MPI_COMM_WORLD, &reqs_prev_r[mpi_rank]); //recv from prev
+      MPI_Wait(&reqs_prev_r[mpi_rank], &stat_prev[mpi_rank]);
+      for(int j = 0; j < N_EXCHANGE_PLAYERS; ++j) {
+        player_arr[7 * N_EXCHANGE_PLAYERS + j] = ghost_arr_next[j];
       }
     }
-    
-    // for (int i = 0; i < MAX_RANK_PLAYERS; i++) {
-    // 
-    // }
-    // increase threshold for each unmatched player
-    
-
-    // exchange players at lower bound of each rank
-
+    //send N_EX_PL to next
+    if(mpi_rank < mpi_size - 1) {
+      MPI_Isend(&player_arr[7 * N_EXCHANGE_PLAYERS], N_EXCHANGE_PLAYERS, mpi_player_type, mpi_rank + 1, MPI_TAG_ANY, MPI_COMM_WORLD, &reqs_prev_s[mpi_rank]); //send to next
+      MPI_Irecv(ghost_arr_prev, N_EXCHANGE_PLAYERS, mpi_player_type, mpi_rank + 1, MPI_TAG_ANY, MPI_COMM_WORLD, &reqs_next_r[mpi_rank]); //recieve from next
+      MPI_Wait(&reqs_next_r[mpi_rank], &stat_next[mpi_rank]);
+      for(int j = 0; j < N_EXCHANGE_PLAYERS; ++j) {
+        player_arr[j] = ghost_arr_prev[j];
+      }
+    }
+    //MPI_Barrier(MPI_COMM_WORLD);
+    // try to match players not in a match
+    for(int j = 0; j < MAX_RANK_PLAYERS; ++j) {
+      if(player_arr[j].wait_time < 0) {
+        for(int k = j + 1; k < MAX_RANK_PLAYERS; ++k) {
+          if(matchable(player_arr[j], player_arr[k])) {
+            player_arr[j].wait_time = GAME_LENGTH;
+            player_arr[k].wait_time = GAME_LENGTH;
+            MM_update(&player_arr[j], &player_arr[k]);
+          }
+        }
+      }
+    }
+    for(int j = 0; j < MAX_RANK_PLAYERS; ++j) {
+      if(player_arr[j].wait_time >= 0) {
+        player_arr[j].wait_time -= 1;
+      } else {
+        player_arr[j].lenience += 1;
+      }
+    }
     //Report statistics
     MPI_Barrier(MPI_COMM_WORLD);
+  }
+  if(mpi_rank == 0) {
+    sort_players(player_arr, 0, MAX_RANK_PLAYERS - 1);
+    for(int i = 0; i < MAX_RANK_PLAYERS; ++i) {
+      pretty_print_debug_player(outfile, player_arr[i], i);
+    }
   }
   //Get total time
   if(mpi_rank == 0) {
@@ -173,23 +201,6 @@ int main(int argc, char ** argv) {
 }
 
 //Other functions here
-
-float playerDistance(Player p1, Player p2) {
-  if (p1.mmr >= p2.mmr) {
-    return (float) p1.mmr - p2.mmr;
-  } else {
-    return (float) p2.mmr - p1.mmr;
-  }
-}
-
-//distance function
-float matchmaking_dist_elo() {
-  return 0.0;
-}
-
-float matchmaking_dist_mmr() {
-  return 0.0;
-}
 
 int n2_cached = 0;
 double n2 = 0.0;
@@ -243,4 +254,66 @@ void input_number(int in) {
       total_players = 1000000; //1,000,000
       break;
   }
+}
+
+//Quicksort
+void swap_h(Player * a, Player * b) {
+  Player t = *a;
+  *a = *b;
+  *b = t;
+}
+
+int partition_h(Player * arr, int low, int high) {
+  int pivot = arr[high].mmr;
+  int i = (low - 1);
+  for(int j = low; j <= high - 1; j++) {
+    if(arr[j].mmr <= pivot) {
+      i++;
+      swap_h(&arr[i], &arr[j]);
+    }
+  }
+  swap_h(&arr[i+1], &arr[high]);
+  return (i+1);
+}
+
+void sort_players(Player * arr, int low, int high) {
+  if(low < high) {
+    int pi = partition_h(arr, low, high);
+    sort_players(arr, low, pi - 1);
+    sort_players(arr, pi + 1, high);
+  }
+}
+
+int matchable(Player a, Player b) {
+  if(a.wait_time < 0 && b.wait_time < 0) {
+    if(a.lenience + b.lenience > MM_CONST * abs(a.mmr - b.mmr) + PING_CONST * (a.ping + b.ping)) return 1;
+  }
+  return 0;
+}
+
+void matchmaking_update_elo(Player * a, Player * b) {
+  //get result of match
+  float qa = pow(10, a->true_mmr / 400.0f);
+  float qb = pow(10, b->true_mmr / 400.0f);
+  float ea = qa / (qa + qb);
+  int res = drand48() < ea;
+  //update
+  qa = pow(10, a->mmr / 400.0f);
+  qb = pow(10, b->mmr / 400.0f);
+  ea = qa / (qa + qb);
+  a->mmr = a->mmr + 32.0 * (res - ea);
+  b->mmr = b->mmr + 32.0 * (1 - (res - ea));
+  //
+  a->wins += res;
+  b->wins += (1-res);
+  a->games += 1;
+  b->games += 1;
+}
+
+void matchmaking_update_trueskill(Player * a, Player * b) {
+  //TODO
+}
+
+void pretty_print_debug_player(FILE * f, Player a, int i) {
+  fprintf(f, "Player %d stats: \n\tMMR: \t\t%d\n\tTRUE MMR:\t%d\n\tPING:\t\t%d\n\tWAIT TIME:\t%d\n\tWINS:\t\t%d\n\tGAMES:\t\t%d\n\tWR:\t\t%d\n", i, a.mmr, a.true_mmr, a.ping, a.wait_time, a.wins, a.games, (int) ((float) a.wins / (float) a.games * 100));
 }
