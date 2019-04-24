@@ -22,7 +22,7 @@
 
 //defines
 #define NUM_TICKS 10000 //Number of ticks
-#define GAME_LENGTH 20 //Number of ticks per game
+#define GAME_LENGTH 10 //Number of ticks per game
 
 #ifdef ELO
 #define MM_update matchmaking_update_elo
@@ -36,7 +36,7 @@
 
 #define START_UNCERT 830
 #define MM_CONST 1.0f / 10.0f
-#define PING_CONST 1.0f / 10.0f
+#define PING_CONST 1.0f / 50.0f
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
@@ -55,7 +55,7 @@ typedef struct Player {
 } Player;
 
 //Global vars
-unsigned int total_players = 16; //1,024
+unsigned int total_players = 1024; //1,024
 
 //Function declarations
 void input_number(int in);
@@ -95,9 +95,9 @@ int main(int argc, char ** argv) {
 
 
   // setup
-  total_players = 1024;
   int MAX_RANK_PLAYERS = total_players / mpi_size;
-  int N_EXCHANGE_PLAYERS = MAX_RANK_PLAYERS / 8;
+  int PCT_EXCH = 4;
+  int N_EXCHANGE_PLAYERS = MAX_RANK_PLAYERS / PCT_EXCH;
 
   MPI_Datatype mpi_player_type;
   MPI_Type_contiguous(8, MPI_INT, &mpi_player_type);
@@ -140,19 +140,24 @@ int main(int argc, char ** argv) {
     //send N_EXCHANGE_PLAYERS to prev
     if(mpi_rank > 0) {
       MPI_Isend(player_arr, N_EXCHANGE_PLAYERS, mpi_player_type, mpi_rank - 1, MPI_TAG_ANY, MPI_COMM_WORLD, &reqs_next_s[mpi_rank]); //send to prev
-      MPI_Irecv(ghost_arr_next, N_EXCHANGE_PLAYERS, mpi_player_type, mpi_rank - 1, MPI_TAG_ANY, MPI_COMM_WORLD, &reqs_prev_r[mpi_rank]); //recv from prev
+      MPI_Irecv(ghost_arr_prev, N_EXCHANGE_PLAYERS, mpi_player_type, mpi_rank - 1, MPI_TAG_ANY, MPI_COMM_WORLD, &reqs_prev_r[mpi_rank]); //recv from prev
       MPI_Wait(&reqs_prev_r[mpi_rank], &stat_prev[mpi_rank]);
-      for(int j = 0; j < N_EXCHANGE_PLAYERS; ++j) {
-        player_arr[7 * N_EXCHANGE_PLAYERS + j] = ghost_arr_next[j];
-      }
     }
     //send N_EX_PL to next
     if(mpi_rank < mpi_size - 1) {
-      MPI_Isend(&player_arr[7 * N_EXCHANGE_PLAYERS], N_EXCHANGE_PLAYERS, mpi_player_type, mpi_rank + 1, MPI_TAG_ANY, MPI_COMM_WORLD, &reqs_prev_s[mpi_rank]); //send to next
-      MPI_Irecv(ghost_arr_prev, N_EXCHANGE_PLAYERS, mpi_player_type, mpi_rank + 1, MPI_TAG_ANY, MPI_COMM_WORLD, &reqs_next_r[mpi_rank]); //recieve from next
+      MPI_Isend(&player_arr[(PCT_EXCH - 1) * N_EXCHANGE_PLAYERS], N_EXCHANGE_PLAYERS, mpi_player_type, mpi_rank + 1, MPI_TAG_ANY, MPI_COMM_WORLD, &reqs_prev_s[mpi_rank]); //send to next
+      MPI_Irecv(ghost_arr_next, N_EXCHANGE_PLAYERS, mpi_player_type, mpi_rank + 1, MPI_TAG_ANY, MPI_COMM_WORLD, &reqs_next_r[mpi_rank]); //recieve from next
       MPI_Wait(&reqs_next_r[mpi_rank], &stat_next[mpi_rank]);
+    }
+    //Overwrite data
+    if(mpi_rank > 0) {
       for(int j = 0; j < N_EXCHANGE_PLAYERS; ++j) {
         player_arr[j] = ghost_arr_prev[j];
+      }
+    }
+    if(mpi_rank < mpi_size - 1) {
+      for(int j = 0; j < N_EXCHANGE_PLAYERS; ++j) {
+        player_arr[(PCT_EXCH - 1) * N_EXCHANGE_PLAYERS + j] = ghost_arr_next[j];
       }
     }
     //MPI_Barrier(MPI_COMM_WORLD);
@@ -162,7 +167,9 @@ int main(int argc, char ** argv) {
         for(int k = j + 1; k < MAX_RANK_PLAYERS; ++k) {
           if(matchable(player_arr[j], player_arr[k])) {
             player_arr[j].wait_time = GAME_LENGTH;
+            player_arr[j].lenience  = 1;
             player_arr[k].wait_time = GAME_LENGTH;
+            player_arr[k].lenience  = 1;
             MM_update(&player_arr[j], &player_arr[k]);
           }
         }
@@ -245,13 +252,13 @@ unsigned int nextping() {
 void input_number(int in) {
   switch(in) {
     case 1:
-      total_players = 10000; //10,000
+      total_players *= 16; //16,384
       break;
     case 2:
-      total_players = 100000; //100,000
+      total_players *= 32; //32,768
       break;
     case 3:
-      total_players = 1000000; //1,000,000
+      total_players *= 64; //65,536
       break;
   }
 }
@@ -287,7 +294,7 @@ void sort_players(Player * arr, int low, int high) {
 int matchable(Player a, Player b) {
   if(a.wait_time < 0 && b.wait_time < 0) {
     //printf("leniences: %d, %d\n", a.lenience, b.lenience);
-    if(a.lenience + b.lenience > MM_CONST * abs(a.mmr - b.mmr) + PING_CONST * (a.ping + b.ping)) return 1;
+    return ((a.lenience + b.lenience) > (MM_CONST * abs(a.mmr - b.mmr) + PING_CONST * (a.ping + b.ping)));
   }
   return 0;
 }
