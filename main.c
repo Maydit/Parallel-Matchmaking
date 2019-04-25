@@ -18,25 +18,26 @@
 #define GetTimeBase MPI_Wtime
 #endif
 
-#define ELO
-
 //defines
+#define TOTAL_PLAYERS 1048576 //total players
 #define NUM_TICKS 10000 //Number of ticks
 #define GAME_LENGTH 10 //Number of ticks per game
 
-#ifdef ELO
+#ifndef MMR
 #define MM_update matchmaking_update_elo
 #define START_MMR 1000
+#define MM_CONST 1.0 / 50
 #define nextmmr next_mmr_elo
 #else
 #define MM_update matchmaking_update_trueskill
+#define MM_CONST 1.0 / 100
 #define START_MMR 2500
 #define nextmmr next_mmr_trueskill
 #endif
 
 #define START_UNCERT 830
-#define MM_CONST 1.0f / 10.0f
-#define PING_CONST 1.0f / 50.0f
+#define PING_CONST 1.0f / 200
+#define BETA 1.0
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
@@ -55,9 +56,6 @@ typedef struct Player {
   int lenience;
 } Player;
 
-//Global vars
-unsigned int total_players = 1024; //1,024
-
 //Function declarations
 void input_number(int in);
 int next_mmr_elo();
@@ -65,7 +63,7 @@ int next_mmr_trueskill();
 unsigned int nextping();
 float playerDistance(Player p1, Player p2);
 int matchmaking_update_elo(Player * a, Player * b);
-void matchmaking_update_trueskill(Player * a, Player * b);
+int matchmaking_update_trueskill(Player * a, Player * b);
 void sort_players(Player * arr, int low, int high);
 int matchable(Player a, Player b);
 
@@ -97,7 +95,7 @@ int main(int argc, char ** argv) {
 
 
   // setup
-  int MAX_RANK_PLAYERS = total_players / mpi_size;
+  int MAX_RANK_PLAYERS = TOTAL_PLAYERS / mpi_size;
   int PCT_EXCH = 4;
   int N_EXCHANGE_PLAYERS = MAX_RANK_PLAYERS / PCT_EXCH;
 
@@ -114,7 +112,7 @@ int main(int argc, char ** argv) {
     player_arr[i].mmr         = START_MMR;
     player_arr[i].uncertainty = START_UNCERT;
     player_arr[i].true_mmr    = nextmmr();
-    player_arr[i].lenience    = 1; //initial lenience
+    player_arr[i].lenience    = 5; //initial lenience
     player_arr[i].wait_time   = -1; //not playing
     player_arr[i].total_wait_time = 0; // total timesteps waited
     player_arr[i].games       = 0;
@@ -206,9 +204,9 @@ int main(int argc, char ** argv) {
           if(matchable(player_arr[j], player_arr[k])) {
             // n_games++;
             player_arr[j].wait_time = GAME_LENGTH;
-            player_arr[j].lenience  = 1;
+            player_arr[j].lenience  = 5;
             player_arr[k].wait_time = GAME_LENGTH;
-            player_arr[k].lenience  = 1;
+            player_arr[k].lenience  = 5;
             // record_data(game_data, &player_arr[j], &player_arr[k], i);
             
             MM_update(&player_arr[j], &player_arr[k]);
@@ -316,20 +314,6 @@ unsigned int nextping() {
   return MAX(1, (int) g);
 }
 
-void input_number(int in) {
-  switch(in) {
-    case 1:
-      total_players *= 16; //16,384
-      break;
-    case 2:
-      total_players *= 32; //32,768
-      break;
-    case 3:
-      total_players *= 64; //65,536
-      break;
-  }
-}
-
 //Quicksort
 void swap_h(Player * a, Player * b) {
   Player t = *a;
@@ -361,7 +345,7 @@ void sort_players(Player * arr, int low, int high) {
 int matchable(Player a, Player b) {
   if(a.wait_time < 0 && b.wait_time < 0) {
     //printf("leniences: %d, %d\n", a.lenience, b.lenience);
-    return ((a.lenience + b.lenience)/2.0 > (MM_CONST * abs(a.mmr - b.mmr) + PING_CONST * (a.ping + b.ping)));
+    return ((a.lenience + b.lenience)/10.0 > (MM_CONST * abs(a.mmr - b.mmr) + PING_CONST * (a.ping + b.ping)));
   }
   return 0;
 }
@@ -389,8 +373,37 @@ int matchmaking_update_elo(Player * a, Player * b) {
   return res_a;
 }
 
-void matchmaking_update_trueskill(Player * a, Player * b) {
-  //TODO
+float Psi(float x);
+float Phi(float x);
+
+int matchmaking_update_trueskill(Player * a, Player * b) {
+  float sig_a = a->uncertainty / 100.0f;
+  float sig_b = b->uncertainty / 100.0f;
+  float a_mmr = a->mmr / 100.0f;
+  float b_mmr = b->mmr / 100.0f;
+  float c = sqrt(2 * BETA * BETA + sig_a * sig_a + sig_b * sig_b);
+  //calc winner
+  float ea = exp(-1 * (a_mmr - b_mmr) *(a_mmr - b_mmr) / 2 / c / c) * (sqrt(2 * BETA * BETA / c / c));
+  printf("%f\n", ea);
+  int res = drand48() < ea;
+  //update
+  if(res) {
+    a->mmr = a->mmr + 100 * (sig_a * sig_a / c) * (Phi((a_mmr - b_mmr) / c));
+    b->mmr = b->mmr - 100 * (sig_b * sig_b / c) * (Phi((a_mmr - b_mmr) / c));
+    a->uncertainty = (int) (100 * sqrt(sig_a * (1 - sig_a * sig_a / c / c * Psi((a_mmr - b_mmr) / c))));
+    b->uncertainty = (int) (100 * sqrt(sig_b * (1 - sig_b * sig_b / c / c * Psi((a_mmr - b_mmr) / c))));
+  } else {
+    a->mmr = a->mmr - 100 * (sig_a * sig_a / c) * (Phi((b_mmr - a_mmr) / c));
+    b->mmr = b->mmr + 100 * (sig_b * sig_b / c) * (Phi((b_mmr - a_mmr) / c));
+    a->uncertainty = (int) (100 * sqrt(sig_a * (1 - sig_a * sig_a / c / c * Psi((b_mmr - a_mmr) / c))));
+    b->uncertainty = (int) (100 * sqrt(sig_b * (1 - sig_b * sig_b / c / c * Psi((b_mmr - a_mmr) / c))));
+  }
+  //
+  a->wins += res;
+  b->wins += !res;
+  a->games += 1;
+  b->games += 1;
+  return res;
 }
 
 void pretty_print_debug_player(FILE * f, Player a, int i) {
@@ -402,30 +415,10 @@ void write_end_data(Player* players) {
   
 }
 
-// void record_data(int* game_data, Player* a, Player* b, int time_step) {
-//   game_data[0] = a.ping;
-//   game_data[1] = b.ping;
-// 
-//   game_data[2] = a.mmr;
-//   game_data[3] = b.mmr;
-// 
-//   game_data[4] = a.uncertainty;
-//   game_data[5] = b.uncertainty;
-// 
-//   game_data[6] = a.true_mmr;
-//   game_data[7] = b.true_mmr;
-// 
-//   game_data[8] = a.lenience;
-//   game_data[9] = b.lenience;
-// 
-//   game_data[10] = a.games;
-//   game_data[11] = b.games;
-// 
-//   game_data[12] = a.wins;
-//   game_data[13] = b.wins;
-// 
-//   game_data[14] = a.id;
-//   game_data[15] = b.id;
-// 
-//   game_data[16] = time_step;  
-// }
+float Phi(float x) {
+  return 4.0;
+}
+
+float Psi(float x) {
+  return 1.0;
+}
