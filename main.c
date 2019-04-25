@@ -23,8 +23,6 @@
 #define NUM_TICKS 10000 //Number of ticks
 #define GAME_LENGTH 10 //Number of ticks per game
 
-#define MMR
-
 #ifndef MMR
 #define MM_update matchmaking_update_elo
 #define START_MMR 1000
