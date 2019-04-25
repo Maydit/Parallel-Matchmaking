@@ -19,9 +19,11 @@
 #endif
 
 //defines
-#define TOTAL_PLAYERS 1048576 //total players
+#define TOTAL_PLAYERS 1024 //1048576 //total players
 #define NUM_TICKS 10000 //Number of ticks
 #define GAME_LENGTH 10 //Number of ticks per game
+
+#define MMR
 
 #ifndef MMR
 #define MM_update matchmaking_update_elo
@@ -37,7 +39,7 @@
 
 #define START_UNCERT 830
 #define PING_CONST 1.0f / 200
-#define BETA 1.0
+#define BETA 4.0
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
@@ -376,15 +378,25 @@ int matchmaking_update_elo(Player * a, Player * b) {
 float Psi(float x);
 float Phi(float x);
 
+float sigmoid(float x) {
+  //1 = .8
+  //-1 = .2
+  //https://www.microsoft.com/en-us/research/project/trueskill-ranking-system/
+  return 1.0 / (exp(-x * 1.3) + 1.0);
+}
+
 int matchmaking_update_trueskill(Player * a, Player * b) {
   float sig_a = a->uncertainty / 100.0f;
   float sig_b = b->uncertainty / 100.0f;
   float a_mmr = a->mmr / 100.0f;
   float b_mmr = b->mmr / 100.0f;
+  float a_tr  = a->true_mmr / 100.0f;
+  float b_tr  = b->true_mmr / 100.0f;
   float c = sqrt(2 * BETA * BETA + sig_a * sig_a + sig_b * sig_b);
   //calc winner
-  float ea = exp(-1 * (a_mmr - b_mmr) *(a_mmr - b_mmr) / 2 / c / c) * (sqrt(2 * BETA * BETA / c / c));
-  printf("%f\n", ea);
+  //float draw = exp(-1 * (a_mmr - b_mmr) *(a_mmr - b_mmr) / 2 / c / c) * (sqrt(2 * BETA * BETA / c / c));
+  float ea = sigmoid((a_tr - b_tr) / BETA);
+  //printf("%f\n", ea);
   int res = drand48() < ea;
   //update
   if(res) {
@@ -416,9 +428,13 @@ void write_end_data(Player* players) {
 }
 
 float Phi(float x) {
-  return 4.0;
+  //Reverse engineered
+  //https://www.moserware.com/assets/computing-your-skill/The%20Math%20Behind%20TrueSkill.pdf
+  return MAX(1.0 - x, 0.1);
 }
 
 float Psi(float x) {
-  return 1.0;
+  //Reverse engineered
+  //https://www.moserware.com/assets/computing-your-skill/The%20Math%20Behind%20TrueSkill.pdf
+  return 1.0 - 1.0 / (exp(-2.0 * x + 2.0) + 1.0);
 }
