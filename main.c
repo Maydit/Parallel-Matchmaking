@@ -19,9 +19,11 @@
 #endif
 
 //defines
-#define TOTAL_PLAYERS 4096 //1024 //1048576 //total players
+#define TOTAL_PLAYERS 1024 //1024 //1048576 //total players
 #define NUM_TICKS 10000 //Number of ticks
 #define GAME_LENGTH 10 //Number of ticks per game
+#define USE_REDUCE 1
+#define USE_GATHER 1
 
 #ifndef MMR
 #define MM_update matchmaking_update_elo
@@ -35,6 +37,7 @@
 #define MM_CONST 1.0 / 100
 #define START_MMR 2500
 #define BUCKET_SIZE 500
+#define N_BUCKETS 10
 #define nextmmr next_mmr_trueskill
 #endif
 
@@ -101,6 +104,7 @@ int main(int argc, char ** argv) {
   int MAX_RANK_PLAYERS = TOTAL_PLAYERS / mpi_size;
   int PCT_EXCH = 4;
   int N_EXCHANGE_PLAYERS = MAX_RANK_PLAYERS / PCT_EXCH;
+  int TICK_FREQ = NUM_TICKS/32;
 
   MPI_Datatype mpi_player_type;
   MPI_Type_contiguous(9, MPI_INT, &mpi_player_type);
@@ -130,6 +134,34 @@ int main(int argc, char ** argv) {
   MPI_Request * reqs_prev_s = malloc(sizeof(MPI_Request) * N_EXCHANGE_PLAYERS);
   MPI_Status  * stat_next   = malloc(sizeof(MPI_Status)  * N_EXCHANGE_PLAYERS);
   MPI_Status  * stat_prev   = malloc(sizeof(MPI_Status)  * N_EXCHANGE_PLAYERS);
+  
+  // setup statistics
+  double stat_time;
+  double stat_start_time;  
+  float bucket_counts;
+  int r_i; // all ranks index
+  int b; // mmr_bucket
+  
+  int sum_counts[N_BUCKETS];
+  int counts[N_BUCKETS];
+  int all_counts[N_BUCKETS*mpi_size];
+  
+  float average_wait_times[N_BUCKETS]; // holds result
+  float wait_times[N_BUCKETS]; // gather source
+  float all_wait_times[N_BUCKETS*mpi_size]; // gather dest
+  
+  float average_winrates[N_BUCKETS];
+  float winrates[N_BUCKETS]; // gather source
+  float all_winrates[N_BUCKETS*mpi_size]; // gather dest
+  
+  float average_mmrs[N_BUCKETS];
+  float mmrs[N_BUCKETS];
+  float all_mmrs[N_BUCKETS*mpi_size];
+  
+  float average_true_mmrs[N_BUCKETS];
+  float true_mmrs[N_BUCKETS];
+  float all_true_mmrs[N_BUCKETS*mpi_size];
+  
   //Report setup time
   if(mpi_rank == 0) {
     setup_time = GetTimeBase() - start_time;
@@ -189,45 +221,113 @@ int main(int argc, char ** argv) {
       }
     }
     //Report statistics
+    if (i % TICK_FREQ == 0) {
+      if (mpi_rank == 0) {
+        printf("\ntick %d\n", i);
+      }
+      // initialize values as 0
+      for (int b = 0; b < N_BUCKETS; b++) {
+        counts[b] = 0;
+        wait_times[b] = 0;
+        winrates[b] = 0;
+        mmrs[b] = 0;
+        true_mmrs[b] = 0;
+      }
+      // get stats for each bucket
+      for (int i = 0; i < MAX_RANK_PLAYERS; i++) {
+        b = get_bucket(player_arr[i].mmr);
+        counts[b] += 1;
+        wait_times[b] += (float)player_arr[i].total_wait_time/(float)player_arr[i].games;
+        winrates[b] += (float)player_arr[i].wins/(float)player_arr[i].games;
+        mmrs[b] += (float)player_arr[i].mmr;
+        true_mmrs[b] += (float)player_arr[i].true_mmr;
+      }
+      if (USE_REDUCE) {
+        if(mpi_rank == 0) {
+          stat_start_time = GetTimeBase();
+        }
+        MPI_Reduce(counts, sum_counts, N_BUCKETS, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_Reduce(wait_times, average_wait_times, N_BUCKETS, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_Reduce(winrates, average_winrates, N_BUCKETS, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_Reduce(mmrs, average_mmrs, N_BUCKETS, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_Reduce(true_mmrs, average_true_mmrs, N_BUCKETS, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (mpi_rank == 0) {
+          for (int b = 0; b < N_BUCKETS; b++) {
+            bucket_counts = (float)sum_counts[b];
+            average_wait_times[b] /= bucket_counts;
+            average_winrates[b] /= bucket_counts;
+            average_mmrs[b] /= bucket_counts;
+            average_true_mmrs[b] /= bucket_counts;
+            printf("%d %d\t%.2f\t%.2f\t%.2f\t%.2f\n", b, sum_counts[b], average_wait_times[b], average_winrates[b], average_mmrs[b], average_true_mmrs[b]);
+          }
+          stat_time = GetTimeBase() - stat_start_time;
+          printf("reduce record time:\t%012.6f\n", stat_time);
+        }
+      }
+      
+      if (USE_GATHER) {
+        if(mpi_rank == 0) {
+          stat_start_time = GetTimeBase();
+        }
+        // gather counts
+        MPI_Gather(counts, N_BUCKETS, MPI_INT, 
+                   all_counts, N_BUCKETS, MPI_INT, 
+                   0, MPI_COMM_WORLD);
+        // gather 
+        MPI_Gather(wait_times, N_BUCKETS, MPI_INT, 
+                   all_wait_times, N_BUCKETS, MPI_INT, 
+                   0, MPI_COMM_WORLD);
+        // gather winrates into all_winrates
+        MPI_Gather(winrates, N_BUCKETS, MPI_FLOAT, 
+                   all_winrates, N_BUCKETS, MPI_FLOAT, 
+                   0, MPI_COMM_WORLD);
+        // gather mmrs into all_mmrs
+        MPI_Gather(mmrs, N_BUCKETS, MPI_FLOAT, 
+                   all_mmrs, N_BUCKETS, MPI_FLOAT, 
+                   0, MPI_COMM_WORLD);               
+        // gather true_mmrs into all_true_mmrs
+        MPI_Gather(true_mmrs, N_BUCKETS, MPI_FLOAT, 
+                   all_true_mmrs, N_BUCKETS, MPI_FLOAT, 
+                   0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (mpi_rank == 0) {
+          for (int b = 0; b < N_BUCKETS; b++) {
+            // initialize values
+            sum_counts[b] = 0;
+            average_wait_times[b] = 0;
+            average_winrates[b] = 0;
+            average_mmrs[b] = 0;
+            average_true_mmrs[b] = 0;
+            // sum over the ranks
+            for (int r = 0; r < mpi_size; r++) {
+              r_i = r*N_BUCKETS + b;
+              if (all_counts[r_i] > 0) {
+                sum_counts[b] += all_counts[r_i];
+                average_wait_times[b] += all_wait_times[r_i];
+                average_winrates[b] += all_winrates[r_i];
+                average_mmrs[b] += all_mmrs[r_i];
+                average_true_mmrs[b] += all_true_mmrs[r_i];
+              }
+            }
+            bucket_counts = (float)sum_counts[b];
+            average_wait_times[b] /= bucket_counts;
+            average_winrates[b] /= bucket_counts;
+            average_mmrs[b] /= bucket_counts;
+            average_true_mmrs[b] /= bucket_counts;
+            printf("%d %d\t%.2f\t%.2f\t%.2f\t%.2f\n", b, sum_counts[b], average_wait_times[b], average_winrates[b], average_mmrs[b], average_true_mmrs[b]);
+          }
+          stat_time = GetTimeBase() - stat_start_time;
+          printf("gather record time:\t%012.6f\n", stat_time);
+        }
+      }
+    }
     MPI_Barrier(MPI_COMM_WORLD);
   }
-  if(mpi_rank == 0) {
-    sort_players(player_arr, 0, MAX_RANK_PLAYERS - 1);
-    for(int i = 0; i < MAX_RANK_PLAYERS; ++i) {
-      pretty_print_debug_player(outfile, player_arr[i], i);
-    }
+  // record final stats
+  if (mpi_rank == 0) {
+    printf("\ntick %d\n", NUM_TICKS);
   }
-  
-  int USE_REDUCE = 0;
-  // calculate statistics
-  float all_average_wait_time[mpi_size];
-  float average_wait_time;
-  int total_wait_time = 0;
-  int total_games = 0;
-  
-  int r_i; // all ranks index
-  int b; // mmr_bucket
-  
-  int sum_counts[N_BUCKETS];
-  int counts[N_BUCKETS];
-  int all_counts[N_BUCKETS*mpi_size];
-  
-  float average_wait_times[N_BUCKETS]; // holds result
-  float wait_times[N_BUCKETS]; // gather source
-  float all_wait_times[N_BUCKETS*mpi_size]; // gather dest
-  
-  float average_winrates[N_BUCKETS];
-  float winrates[N_BUCKETS]; // gather source
-  float all_winrates[N_BUCKETS*mpi_size]; // gather dest
-  
-  float average_mmrs[N_BUCKETS];
-  float mmrs[N_BUCKETS];
-  float all_mmrs[N_BUCKETS*mpi_size];
-  
-  float average_true_mmrs[N_BUCKETS];
-  float true_mmrs[N_BUCKETS];
-  float all_true_mmrs[N_BUCKETS*mpi_size];
-  
   // initialize values as 0
   for (int b = 0; b < N_BUCKETS; b++) {
     counts[b] = 0;
@@ -236,10 +336,8 @@ int main(int argc, char ** argv) {
     mmrs[b] = 0;
     true_mmrs[b] = 0;
   }
-  
+  // get stats for each bucket
   for (int i = 0; i < MAX_RANK_PLAYERS; i++) {
-    // total_wait_time += player_arr[i].total_wait_time;
-    // total_games += player_arr[i].games;
     b = get_bucket(player_arr[i].mmr);
     counts[b] += 1;
     wait_times[b] += (float)player_arr[i].total_wait_time/(float)player_arr[i].games;
@@ -247,19 +345,34 @@ int main(int argc, char ** argv) {
     mmrs[b] += (float)player_arr[i].mmr;
     true_mmrs[b] += (float)player_arr[i].true_mmr;
   }
-  
-  // average_wait_time = (float)total_wait_time/(float)total_games;
-  // MPI_Gather(&average_wait_time, 1, MPI_FLOAT, all_average_wait_time, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
-  
   if (USE_REDUCE) {
-    for (int b = 0; b < N_BUCKETS; b++) {
-      MPI_Reduce(&counts[b], &sum_counts[b], 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
-      MPI_Reduce(&wait_times[b], &average_wait_times[b], 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
-      MPI_Reduce(&winrates[b], &average_winrates[b], 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
-      MPI_Reduce(&mmrs[b], &average_mmrs[b], 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
-      MPI_Reduce(&true_mmrs[b], &average_true_mmrs[b], 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+    if(mpi_rank == 0) {
+      stat_start_time = GetTimeBase();
     }
-  } else {
+    MPI_Reduce(counts, sum_counts, N_BUCKETS, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(wait_times, average_wait_times, N_BUCKETS, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(winrates, average_winrates, N_BUCKETS, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(mmrs, average_mmrs, N_BUCKETS, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(true_mmrs, average_true_mmrs, N_BUCKETS, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (mpi_rank == 0) {
+      for (int b = 0; b < N_BUCKETS; b++) {
+        bucket_counts = (float)sum_counts[b];
+        average_wait_times[b] /= bucket_counts;
+        average_winrates[b] /= bucket_counts;
+        average_mmrs[b] /= bucket_counts;
+        average_true_mmrs[b] /= bucket_counts;
+        printf("%d %d\t%.2f\t%.2f\t%.2f\t%.2f\n", b, sum_counts[b], average_wait_times[b], average_winrates[b], average_mmrs[b], average_true_mmrs[b]);
+      }
+      stat_time = GetTimeBase() - stat_start_time;
+      printf("reduce record time:\t%012.6f\n", stat_time);
+    }
+  }
+  
+  if (USE_GATHER) {
+    if(mpi_rank == 0) {
+      stat_start_time = GetTimeBase();
+    }
     // gather counts
     MPI_Gather(counts, N_BUCKETS, MPI_INT, 
                all_counts, N_BUCKETS, MPI_INT, 
@@ -280,48 +393,42 @@ int main(int argc, char ** argv) {
     MPI_Gather(true_mmrs, N_BUCKETS, MPI_FLOAT, 
                all_true_mmrs, N_BUCKETS, MPI_FLOAT, 
                0, MPI_COMM_WORLD);
-  
-  }
-  
-  MPI_Barrier(MPI_COMM_WORLD);
-  float bucket_counts;
-  if (mpi_rank == 0) {
-    // for (int i = 0; i < mpi_size; i++) {
-    //   printf("%d %f\n", mpi_rank, all_average_wait_time[i]);
-    // }
-    for (int b = 0; b < N_BUCKETS; b++) {
-      if (USE_REDUCE) {
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (mpi_rank == 0) {
+      for (int b = 0; b < N_BUCKETS; b++) {
+        // initialize values
+        sum_counts[b] = 0;
+        average_wait_times[b] = 0;
+        average_winrates[b] = 0;
+        average_mmrs[b] = 0;
+        average_true_mmrs[b] = 0;
+        // sum over the ranks
+        for (int r = 0; r < mpi_size; r++) {
+          r_i = r*N_BUCKETS + b;
+          if (all_counts[r_i] > 0) {
+            sum_counts[b] += all_counts[r_i];
+            average_wait_times[b] += all_wait_times[r_i];
+            average_winrates[b] += all_winrates[r_i];
+            average_mmrs[b] += all_mmrs[r_i];
+            average_true_mmrs[b] += all_true_mmrs[r_i];
+          }
+        }
         bucket_counts = (float)sum_counts[b];
         average_wait_times[b] /= bucket_counts;
         average_winrates[b] /= bucket_counts;
         average_mmrs[b] /= bucket_counts;
         average_true_mmrs[b] /= bucket_counts;
         printf("%d %d\t%.2f\t%.2f\t%.2f\t%.2f\n", b, sum_counts[b], average_wait_times[b], average_winrates[b], average_mmrs[b], average_true_mmrs[b]);
-      } else {
-        // initialize values
-        counts[b] = 0;
-        wait_times[b] = 0;
-        winrates[b] = 0;
-        mmrs[b] = 0;
-        true_mmrs[b] = 0;
-        // sum over the ranks
-        for (int r = 0; r < mpi_size; r++) {
-          r_i = r*N_BUCKETS + b;
-          if (all_counts[r_i] > 0) {
-            counts[b] += all_counts[r_i];
-            wait_times[b] += all_wait_times[r_i];
-            winrates[b] += all_winrates[r_i];
-            mmrs[b] += all_mmrs[r_i];
-            true_mmrs[b] += all_true_mmrs[r_i];
-          }
-        }
-        bucket_counts = (float)counts[b];
-        wait_times[b] /= bucket_counts;
-        winrates[b] /= bucket_counts;
-        mmrs[b] /= bucket_counts;
-        true_mmrs[b] /= bucket_counts;
-        printf("%d %d\t%.2f\t%.2f\t%.2f\t%.2f\n", b, counts[b], wait_times[b], winrates[b], mmrs[b], true_mmrs[b]);
       }
+      stat_time = GetTimeBase() - stat_start_time;
+      printf("gather record time:\t%012.6f\n", stat_time);
+    }
+  }
+  
+  if(mpi_rank == 0) {
+    sort_players(player_arr, 0, MAX_RANK_PLAYERS - 1);
+    for(int i = 0; i < MAX_RANK_PLAYERS; ++i) {
+      pretty_print_debug_player(outfile, player_arr[i], i);
     }
   }
   //Get total time
