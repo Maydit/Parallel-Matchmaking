@@ -49,6 +49,7 @@ typedef struct Player {
   int ping;
   int true_mmr;
   int wait_time; //time remaining
+  int total_wait_time;
   int wins; //games won
   int games; //games played
   int lenience;
@@ -63,11 +64,12 @@ int next_mmr_elo();
 int next_mmr_trueskill();
 unsigned int nextping();
 float playerDistance(Player p1, Player p2);
-void matchmaking_update_elo(Player * a, Player * b);
+int matchmaking_update_elo(Player * a, Player * b);
 void matchmaking_update_trueskill(Player * a, Player * b);
 void sort_players(Player * arr, int low, int high);
 int matchable(Player a, Player b);
 
+void record_data(int* game_data, Player* a, Player* b);
 void pretty_print_debug_player(FILE * f, Player a, int i);
 
 //Main
@@ -100,7 +102,7 @@ int main(int argc, char ** argv) {
   int N_EXCHANGE_PLAYERS = MAX_RANK_PLAYERS / PCT_EXCH;
 
   MPI_Datatype mpi_player_type;
-  MPI_Type_contiguous(8, MPI_INT, &mpi_player_type);
+  MPI_Type_contiguous(9, MPI_INT, &mpi_player_type);
   MPI_Type_commit(&mpi_player_type);
 
   //Alloc memory
@@ -114,6 +116,7 @@ int main(int argc, char ** argv) {
     player_arr[i].true_mmr    = nextmmr();
     player_arr[i].lenience    = 1; //initial lenience
     player_arr[i].wait_time   = -1; //not playing
+    player_arr[i].total_wait_time = 0; // total timesteps waited
     player_arr[i].games       = 0;
     player_arr[i].wins        = 0;
   }
@@ -126,6 +129,41 @@ int main(int argc, char ** argv) {
   MPI_Request * reqs_prev_s = malloc(sizeof(MPI_Request) * N_EXCHANGE_PLAYERS);
   MPI_Status  * stat_next   = malloc(sizeof(MPI_Status)  * N_EXCHANGE_PLAYERS);
   MPI_Status  * stat_prev   = malloc(sizeof(MPI_Status)  * N_EXCHANGE_PLAYERS);
+
+  // file setup
+  // int a_won;
+  // FILE *fp_games;
+  // MPI_File mpi_f_games;
+  // char file[100];
+  // int DATA_SIZE = 17;
+  // int game_data[DATA_LENGTH];
+  // 
+  // char expNum[3] = "0";
+  // if (mpi_rank == 0) {
+  //   strcpy(file, "out/games_");
+  //   strcat(file, expNum);
+  //   strcat(file, ".dat");
+  //   fp_games = fopen(file, "w");
+  // }
+  // strcpy(file, "out/games_");
+  // strcat(file, expNum);
+  // strcat(file, ".dat");
+  // MPI_Status status;
+  // MPI_File_delete(file, MPI_INFO_NULL);
+  // MPI_Barrier(MPI_COMM_WORLD);
+  // MPI_File_open(MPI_COMM_WORLD, file, MPI_MODE_CREATE|MPI_MODE_WRONLY, MPI_INFO_NULL, &mpi_f_games);
+  // int MAX_GAMES = (MAX_RANK_PLAYERS/2)*((float)NUM_TICKS/(float)GAME_LENGTH);
+  // printf("%d\n", max_games);
+  // int n_games = 0;
+  // MPI_Barrier(MPI_COMM_WORLD);
+  // MPI_Offset rank_offset = sizeof(int)*(mpi_rank*MAX_GAMES*DATA_LENGTH);
+  // for (int i = 0; i < 4; i++) {
+  //   // game i
+  //   game_data[0] = i;
+  //   game_data[1] = i*2;
+  // 
+  // }
+  
 
   //Report setup time
   if(mpi_rank == 0) {
@@ -166,11 +204,19 @@ int main(int argc, char ** argv) {
       if(player_arr[j].wait_time < 0) {
         for(int k = j + 1; k < MAX_RANK_PLAYERS; ++k) {
           if(matchable(player_arr[j], player_arr[k])) {
+            // n_games++;
             player_arr[j].wait_time = GAME_LENGTH;
             player_arr[j].lenience  = 1;
             player_arr[k].wait_time = GAME_LENGTH;
             player_arr[k].lenience  = 1;
+            // record_data(game_data, &player_arr[j], &player_arr[k], i);
+            
             MM_update(&player_arr[j], &player_arr[k]);
+            
+            
+            // MPI_File_write_at(mpi_f_games, rank_offset+(n_games*DATA_LENGTH*sizeof(int)), game_data, data_size, MPI_INT, &status);
+            
+            
           }
         }
       }
@@ -180,6 +226,7 @@ int main(int argc, char ** argv) {
         player_arr[j].wait_time -= 1;
       } else {
         player_arr[j].lenience += 1;
+        player_arr[j].total_wait_time += 1;
       }
     }
     //Report statistics
@@ -191,6 +238,26 @@ int main(int argc, char ** argv) {
       pretty_print_debug_player(outfile, player_arr[i], i);
     }
   }
+  // int average_wait_times[MAX_RANK_PLAYERS];
+  float all_average_wait_time[mpi_size];
+  float average_wait_time;
+  int total_wait_time = 0;
+  int total_games = 0;
+  for (int i = 0; i < MAX_RANK_PLAYERS; i++) {
+    total_wait_time += player_arr[i].total_wait_time;
+    total_games += player_arr[i].games;
+  }
+  average_wait_time = (float)total_wait_time/(float)total_games;
+  
+  MPI_Gather(&average_wait_time, 1, MPI_FLOAT, all_average_wait_time, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
+  MPI_Barrier(MPI_COMM_WORLD);
+  if (mpi_rank == 0) {
+    for (int i = 0; i < mpi_size; i++) {
+      printf("%f\n", all_average_wait_time[i]);
+    }
+  }
+  
+  
   //Get total time
   if(mpi_rank == 0) {
     total_time = GetTimeBase() - start_time;
@@ -294,12 +361,12 @@ void sort_players(Player * arr, int low, int high) {
 int matchable(Player a, Player b) {
   if(a.wait_time < 0 && b.wait_time < 0) {
     //printf("leniences: %d, %d\n", a.lenience, b.lenience);
-    return ((a.lenience + b.lenience) > (MM_CONST * abs(a.mmr - b.mmr) + PING_CONST * (a.ping + b.ping)));
+    return ((a.lenience + b.lenience)/2.0 > (MM_CONST * abs(a.mmr - b.mmr) + PING_CONST * (a.ping + b.ping)));
   }
   return 0;
 }
 
-void matchmaking_update_elo(Player * a, Player * b) {
+int matchmaking_update_elo(Player * a, Player * b) {
   //get result of match
   float qa = pow(10, a->true_mmr / 400.0f);
   float qb = pow(10, b->true_mmr / 400.0f);
@@ -319,6 +386,7 @@ void matchmaking_update_elo(Player * a, Player * b) {
   b->wins += res_b;
   a->games += 1;
   b->games += 1;
+  return res_a;
 }
 
 void matchmaking_update_trueskill(Player * a, Player * b) {
@@ -328,3 +396,36 @@ void matchmaking_update_trueskill(Player * a, Player * b) {
 void pretty_print_debug_player(FILE * f, Player a, int i) {
   fprintf(f, "Player %d stats: \n\tMMR: \t\t%d\n\tTRUE MMR:\t%d\n\tPING:\t\t%d\n\tWAIT TIME:\t%d\n\tWINS:\t\t%d\n\tGAMES:\t\t%d\n\tWR:\t\t%d\n", i, a.mmr, a.true_mmr, a.ping, a.wait_time, a.wins, a.games, (int) ((float) a.wins / (float) a.games * 100));
 }
+
+
+void write_end_data(Player* players) {
+  
+}
+
+// void record_data(int* game_data, Player* a, Player* b, int time_step) {
+//   game_data[0] = a.ping;
+//   game_data[1] = b.ping;
+// 
+//   game_data[2] = a.mmr;
+//   game_data[3] = b.mmr;
+// 
+//   game_data[4] = a.uncertainty;
+//   game_data[5] = b.uncertainty;
+// 
+//   game_data[6] = a.true_mmr;
+//   game_data[7] = b.true_mmr;
+// 
+//   game_data[8] = a.lenience;
+//   game_data[9] = b.lenience;
+// 
+//   game_data[10] = a.games;
+//   game_data[11] = b.games;
+// 
+//   game_data[12] = a.wins;
+//   game_data[13] = b.wins;
+// 
+//   game_data[14] = a.id;
+//   game_data[15] = b.id;
+// 
+//   game_data[16] = time_step;  
+// }
