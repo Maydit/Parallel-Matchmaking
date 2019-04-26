@@ -23,7 +23,7 @@
 #define NUM_TICKS 10000 //Number of ticks
 #define GAME_LENGTH 10 //Number of ticks per game
 #define USE_REDUCE 1
-#define USE_GATHER 0
+#define USE_GATHER 1
 
 #define MMR
 #ifndef MMR
@@ -423,7 +423,9 @@ int main(int argc, char ** argv) {
         average_winrates[b] /= bucket_counts;
         average_mmrs[b] /= bucket_counts;
         average_true_mmrs[b] /= bucket_counts;
-        printf("%d %d\t%.2f\t%.2f\t%.2f\t%.2f\n", b, sum_counts[b], average_wait_times[b], average_winrates[b], average_mmrs[b], average_true_mmrs[b]);
+        if (!USE_REDUCE) {
+          printf("%d %d\t%.2f\t%.2f\t%.2f\t%.2f\n", b, sum_counts[b], average_wait_times[b], average_winrates[b], average_mmrs[b], average_true_mmrs[b]);
+        }  
       }
       stat_time = (GetTimeBase() - stat_start_time) / g_processor_frequency;
       printf("gather record time:\t%012.6f\n", stat_time);
