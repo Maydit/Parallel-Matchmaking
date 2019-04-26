@@ -445,12 +445,12 @@ int main(int argc, char ** argv) {
     }
   }
   
-  if(mpi_rank == 0) {
+  /*if(mpi_rank == 0) {
     sort_players(player_arr, 0, MAX_RANK_PLAYERS - 1);
     for(int i = 0; i < MAX_RANK_PLAYERS; ++i) {
       pretty_print_debug_player(outfile, player_arr[i], i);
     }
-  }
+  }*/
   //Get total time
   if(mpi_rank == 0) {
     total_time = GetTimeBase() - start_time;
