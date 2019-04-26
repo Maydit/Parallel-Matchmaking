@@ -466,19 +466,19 @@ int main(int argc, char ** argv) {
   free(player_arr);
   free(sum_counts);
   free(counts);
-  free(all_counts);
+  // free(all_counts);
   free(average_wait_times);
   free(wait_times);
-  free(all_wait_times);
+  // free(all_wait_times);
   free(average_winrates);
   free(winrates);
-  free(all_winrates);
+  // free(all_winrates);
   free(average_mmrs);
   free(mmrs);
-  free(all_mmrs);
+  // free(all_mmrs);
   free(average_true_mmrs);
   free(true_mmrs);
-  free(all_true_mmrs);
+  // free(all_true_mmrs);
   return 0;
 }
 
