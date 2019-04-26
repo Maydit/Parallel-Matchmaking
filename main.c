@@ -19,12 +19,13 @@
 #endif
 
 //defines
-#define TOTAL_PLAYERS 1024 //1024 //1048576 //total players
+#define TOTAL_PLAYERS 8192 //16384//1024 //1048576 //total players
 #define NUM_TICKS 10000 //Number of ticks
 #define GAME_LENGTH 10 //Number of ticks per game
 #define USE_REDUCE 1
 #define USE_GATHER 1
 
+#define MMR
 #ifndef MMR
 #define MM_update matchmaking_update_elo
 #define MM_CONST 1.0 / 50
@@ -37,7 +38,7 @@
 #define MM_CONST 1.0 / 100
 #define START_MMR 2500
 #define BUCKET_SIZE 500
-#define N_BUCKETS 10
+#define N_BUCKETS 9
 #define nextmmr next_mmr_trueskill
 #endif
 
@@ -142,25 +143,40 @@ int main(int argc, char ** argv) {
   int r_i; // all ranks index
   int b; // mmr_bucket
   
-  int sum_counts[N_BUCKETS];
-  int counts[N_BUCKETS];
-  int all_counts[N_BUCKETS*mpi_size];
+  int *sum_counts = (int*)malloc(sizeof(int)*N_BUCKETS);
+  int *counts = (int*)malloc(sizeof(int)*N_BUCKETS);
+  int *all_counts = (int*)malloc(sizeof(int)*N_BUCKETS*mpi_size);
+  // int sum_counts[N_BUCKETS];
+  // int counts[N_BUCKETS];
+  // int all_counts[N_BUCKETS*mpi_size];
   
-  float average_wait_times[N_BUCKETS]; // holds result
-  float wait_times[N_BUCKETS]; // gather source
-  float all_wait_times[N_BUCKETS*mpi_size]; // gather dest
+  float *average_wait_times = (float*)malloc(sizeof(float)*N_BUCKETS);
+  float *wait_times = (float*)malloc(sizeof(float)*N_BUCKETS);
+  float *all_wait_times = (float*)malloc(sizeof(float)*N_BUCKETS*mpi_size);
+  // float average_wait_times[N_BUCKETS]; // holds result
+  // float wait_times[N_BUCKETS]; // gather source
+  // float all_wait_times[N_BUCKETS*mpi_size]; // gather dest
   
-  float average_winrates[N_BUCKETS];
-  float winrates[N_BUCKETS]; // gather source
-  float all_winrates[N_BUCKETS*mpi_size]; // gather dest
+  float *average_winrates = (float*)malloc(sizeof(float)*N_BUCKETS);
+  float *winrates = (float*)malloc(sizeof(float)*N_BUCKETS);
+  float *all_winrates = (float*)malloc(sizeof(float)*N_BUCKETS*mpi_size);
+  // float average_winrates[N_BUCKETS];
+  // float winrates[N_BUCKETS]; // gather source
+  // float all_winrates[N_BUCKETS*mpi_size]; // gather dest
   
-  float average_mmrs[N_BUCKETS];
-  float mmrs[N_BUCKETS];
-  float all_mmrs[N_BUCKETS*mpi_size];
+  float *average_mmrs = (float*)malloc(sizeof(float)*N_BUCKETS);
+  float *mmrs= (float*)malloc(sizeof(float)*N_BUCKETS);
+  float *all_mmrs = (float*)malloc(sizeof(float)*N_BUCKETS*mpi_size);
+  // float average_mmrs[N_BUCKETS];
+  // float mmrs[N_BUCKETS];
+  // float all_mmrs[N_BUCKETS*mpi_size];
   
-  float average_true_mmrs[N_BUCKETS];
-  float true_mmrs[N_BUCKETS];
-  float all_true_mmrs[N_BUCKETS*mpi_size];
+  float *average_true_mmrs = (float*)malloc(sizeof(float)*N_BUCKETS);
+  float *true_mmrs = (float*)malloc(sizeof(float)*N_BUCKETS);
+  float *all_true_mmrs = (float*)malloc(sizeof(float)*N_BUCKETS*mpi_size);
+  // float average_true_mmrs[N_BUCKETS];
+  // float true_mmrs[N_BUCKETS];
+  // float all_true_mmrs[N_BUCKETS*mpi_size];
   
   //Report setup time
   if(mpi_rank == 0) {
@@ -243,6 +259,7 @@ int main(int argc, char ** argv) {
         true_mmrs[b] += (float)player_arr[i].true_mmr;
       }
       if (USE_REDUCE) {
+        MPI_Barrier(MPI_COMM_WORLD);
         if(mpi_rank == 0) {
           stat_start_time = GetTimeBase();
         }
@@ -267,6 +284,7 @@ int main(int argc, char ** argv) {
       }
       
       if (USE_GATHER) {
+        MPI_Barrier(MPI_COMM_WORLD);
         if(mpi_rank == 0) {
           stat_start_time = GetTimeBase();
         }
@@ -346,6 +364,7 @@ int main(int argc, char ** argv) {
     true_mmrs[b] += (float)player_arr[i].true_mmr;
   }
   if (USE_REDUCE) {
+    MPI_Barrier(MPI_COMM_WORLD);
     if(mpi_rank == 0) {
       stat_start_time = GetTimeBase();
     }
@@ -370,6 +389,7 @@ int main(int argc, char ** argv) {
   }
   
   if (USE_GATHER) {
+    MPI_Barrier(MPI_COMM_WORLD);
     if(mpi_rank == 0) {
       stat_start_time = GetTimeBase();
     }
@@ -444,11 +464,27 @@ int main(int argc, char ** argv) {
   }
   //free memory
   free(player_arr);
+  free(sum_counts);
+  free(counts);
+  free(all_counts);
+  free(average_wait_times);
+  free(wait_times);
+  free(all_wait_times);
+  free(average_winrates);
+  free(winrates);
+  free(all_winrates);
+  free(average_mmrs);
+  free(mmrs);
+  free(all_mmrs);
+  free(average_true_mmrs);
+  free(true_mmrs);
+  free(all_true_mmrs);
   return 0;
 }
 
 //Other functions here
 int get_bucket(int mmr) {
+  // printf("%d %d %d %d\n", mmr, BUCKET_SIZE, N_BUCKETS, mmr/BUCKET_SIZE);
   if (mmr < BUCKET_SIZE) {
     return 0;
   } else if (mmr >= BUCKET_SIZE*(N_BUCKETS-1)) {
