@@ -23,7 +23,7 @@
 #define NUM_TICKS 10000 //Number of ticks
 #define GAME_LENGTH 10 //Number of ticks per game
 #define USE_REDUCE 1
-#define USE_GATHER 1
+// #define USE_GATHER 1
 
 #define MMR
 #ifndef MMR
@@ -143,37 +143,37 @@ int main(int argc, char ** argv) {
   int r_i; // all ranks index
   int b; // mmr_bucket
   
-  int *sum_counts = (int*)malloc(sizeof(int)*N_BUCKETS);
-  int *counts = (int*)malloc(sizeof(int)*N_BUCKETS);
-  int *all_counts = (int*)malloc(sizeof(int)*N_BUCKETS*mpi_size);
+  int *sum_counts = malloc(sizeof(int)*N_BUCKETS);
+  int *counts = malloc(sizeof(int)*N_BUCKETS);
+  // int *all_counts = malloc(sizeof(int)*N_BUCKETS*mpi_size);
   // int sum_counts[N_BUCKETS];
   // int counts[N_BUCKETS];
   // int all_counts[N_BUCKETS*mpi_size];
   
-  float *average_wait_times = (float*)malloc(sizeof(float)*N_BUCKETS);
-  float *wait_times = (float*)malloc(sizeof(float)*N_BUCKETS);
-  float *all_wait_times = (float*)malloc(sizeof(float)*N_BUCKETS*mpi_size);
+  float *average_wait_times = malloc(sizeof(float)*N_BUCKETS);
+  float *wait_times = malloc(sizeof(float)*N_BUCKETS);
+  // float *all_wait_times = malloc(sizeof(float)*N_BUCKETS*mpi_size);
   // float average_wait_times[N_BUCKETS]; // holds result
   // float wait_times[N_BUCKETS]; // gather source
   // float all_wait_times[N_BUCKETS*mpi_size]; // gather dest
   
-  float *average_winrates = (float*)malloc(sizeof(float)*N_BUCKETS);
-  float *winrates = (float*)malloc(sizeof(float)*N_BUCKETS);
-  float *all_winrates = (float*)malloc(sizeof(float)*N_BUCKETS*mpi_size);
+  float *average_winrates = malloc(sizeof(float)*N_BUCKETS);
+  float *winrates = malloc(sizeof(float)*N_BUCKETS);
+  // float *all_winrates = malloc(sizeof(float)*N_BUCKETS*mpi_size);
   // float average_winrates[N_BUCKETS];
   // float winrates[N_BUCKETS]; // gather source
   // float all_winrates[N_BUCKETS*mpi_size]; // gather dest
   
-  float *average_mmrs = (float*)malloc(sizeof(float)*N_BUCKETS);
-  float *mmrs= (float*)malloc(sizeof(float)*N_BUCKETS);
-  float *all_mmrs = (float*)malloc(sizeof(float)*N_BUCKETS*mpi_size);
+  float *average_mmrs = malloc(sizeof(float)*N_BUCKETS);
+  float *mmrs= malloc(sizeof(float)*N_BUCKETS);
+  // float *all_mmrs = malloc(sizeof(float)*N_BUCKETS*mpi_size);
   // float average_mmrs[N_BUCKETS];
   // float mmrs[N_BUCKETS];
   // float all_mmrs[N_BUCKETS*mpi_size];
   
-  float *average_true_mmrs = (float*)malloc(sizeof(float)*N_BUCKETS);
-  float *true_mmrs = (float*)malloc(sizeof(float)*N_BUCKETS);
-  float *all_true_mmrs = (float*)malloc(sizeof(float)*N_BUCKETS*mpi_size);
+  float *average_true_mmrs = malloc(sizeof(float)*N_BUCKETS);
+  float *true_mmrs = malloc(sizeof(float)*N_BUCKETS);
+  // float *all_true_mmrs = malloc(sizeof(float)*N_BUCKETS*mpi_size);
   // float average_true_mmrs[N_BUCKETS];
   // float true_mmrs[N_BUCKETS];
   // float all_true_mmrs[N_BUCKETS*mpi_size];
