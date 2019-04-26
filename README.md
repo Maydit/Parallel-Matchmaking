@@ -12,6 +12,8 @@ TODOS:
 
 Run code to produce graphs
 
+Write results
+
 Write abstract
 
 Write conclusion
