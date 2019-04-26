@@ -23,7 +23,7 @@
 #define NUM_TICKS 10000 //Number of ticks
 #define GAME_LENGTH 10 //Number of ticks per game
 #define USE_REDUCE 1
-// #define USE_GATHER 1
+#define USE_GATHER 0
 
 #define MMR
 #ifndef MMR
