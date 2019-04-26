@@ -25,7 +25,6 @@
 #define USE_REDUCE 1
 #define USE_GATHER 1
 
-#define MMR
 #ifndef MMR
 #define MM_update matchmaking_update_elo
 #define MM_CONST 1.0 / 50
