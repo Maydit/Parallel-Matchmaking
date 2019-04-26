@@ -7,3 +7,15 @@ Edit run.sh as you please
 
 (Temporary link to writeup)
 https://www.overleaf.com/project/5cb8f8a6c16dba589acd63ad
+
+TODOS:
+
+Run code to produce graphs
+
+Write abstract
+
+Write conclusion
+
+Finish writing algo if not enough space
+
+Make the code pretty (and test again)
