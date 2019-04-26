@@ -51,6 +51,8 @@
 
 #define MPI_TAG_ANY 1
 
+double g_processor_frequency = 1600000000.0; // processing speed for BG/Q
+
 typedef struct Player {
   int mmr;
   int uncertainty;
@@ -129,12 +131,12 @@ int main(int argc, char ** argv) {
   Player * ghost_arr_prev = malloc(sizeof(Player) * N_EXCHANGE_PLAYERS);
   Player * ghost_arr_next = malloc(sizeof(Player) * N_EXCHANGE_PLAYERS);
   
-  MPI_Request * reqs_next_r = malloc(sizeof(MPI_Request) * N_EXCHANGE_PLAYERS);
-  MPI_Request * reqs_prev_r = malloc(sizeof(MPI_Request) * N_EXCHANGE_PLAYERS);
-  MPI_Request * reqs_next_s = malloc(sizeof(MPI_Request) * N_EXCHANGE_PLAYERS);
-  MPI_Request * reqs_prev_s = malloc(sizeof(MPI_Request) * N_EXCHANGE_PLAYERS);
-  MPI_Status  * stat_next   = malloc(sizeof(MPI_Status)  * N_EXCHANGE_PLAYERS);
-  MPI_Status  * stat_prev   = malloc(sizeof(MPI_Status)  * N_EXCHANGE_PLAYERS);
+  MPI_Request * reqs_next_r = malloc(sizeof(MPI_Request) * mpi_size);
+  MPI_Request * reqs_prev_r = malloc(sizeof(MPI_Request) * mpi_size);
+  MPI_Request * reqs_next_s = malloc(sizeof(MPI_Request) * mpi_size);
+  MPI_Request * reqs_prev_s = malloc(sizeof(MPI_Request) * mpi_size);
+  MPI_Status  * stat_next   = malloc(sizeof(MPI_Status)  * mpi_size);
+  MPI_Status  * stat_prev   = malloc(sizeof(MPI_Status)  * mpi_size);
   
   // setup statistics
   double stat_time;
@@ -180,7 +182,7 @@ int main(int argc, char ** argv) {
   
   //Report setup time
   if(mpi_rank == 0) {
-    setup_time = GetTimeBase() - start_time;
+    setup_time = (GetTimeBase() - start_time) / g_processor_frequency;
     fprintf(outfile, "Total setup time:\t%012.6f\n", setup_time);
   }
   MPI_Barrier(MPI_COMM_WORLD);
@@ -278,7 +280,7 @@ int main(int argc, char ** argv) {
             average_true_mmrs[b] /= bucket_counts;
             printf("%d %d\t%.2f\t%.2f\t%.2f\t%.2f\n", b, sum_counts[b], average_wait_times[b], average_winrates[b], average_mmrs[b], average_true_mmrs[b]);
           }
-          stat_time = GetTimeBase() - stat_start_time;
+          stat_time = (GetTimeBase() - stat_start_time) / g_processor_frequency;
           printf("reduce record time:\t%012.6f\n", stat_time);
         }
       }
@@ -383,7 +385,7 @@ int main(int argc, char ** argv) {
         average_true_mmrs[b] /= bucket_counts;
         printf("%d %d\t%.2f\t%.2f\t%.2f\t%.2f\n", b, sum_counts[b], average_wait_times[b], average_winrates[b], average_mmrs[b], average_true_mmrs[b]);
       }
-      stat_time = GetTimeBase() - stat_start_time;
+      stat_time = (GetTimeBase() - stat_start_time) / g_processor_frequency;
       printf("reduce record time:\t%012.6f\n", stat_time);
     }
   }
@@ -440,7 +442,7 @@ int main(int argc, char ** argv) {
   //       average_true_mmrs[b] /= bucket_counts;
   //       printf("%d %d\t%.2f\t%.2f\t%.2f\t%.2f\n", b, sum_counts[b], average_wait_times[b], average_winrates[b], average_mmrs[b], average_true_mmrs[b]);
   //     }
-  //     stat_time = GetTimeBase() - stat_start_time;
+  //     stat_time = (GetTimeBase() - stat_start_time) / g_processor_frequency;
   //     printf("gather record time:\t%012.6f\n", stat_time);
   //   }
   // }
@@ -453,7 +455,7 @@ int main(int argc, char ** argv) {
   }*/
   //Get total time
   if(mpi_rank == 0) {
-    total_time = GetTimeBase() - start_time;
+    total_time = (GetTimeBase() - start_time) / g_processor_frequency;
     fprintf(outfile, "Total runtime:\t\t%012.6f\nAverage time per tick:\t%012.6f\n", total_time, (total_time - setup_time) / NUM_TICKS);
   }
   MPI_Barrier(MPI_COMM_WORLD);
