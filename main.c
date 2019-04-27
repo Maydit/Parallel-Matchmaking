@@ -19,7 +19,7 @@
 #endif
 
 //defines
-#define TOTAL_PLAYERS 32768 //8192 //16384//1024 //1048576 //total players
+#define TOTAL_PLAYERS 32768 //total players
 #define NUM_TICKS 10000 //Number of ticks
 #define GAME_LENGTH 10 //Number of ticks per game
 #define USE_REDUCE 1
@@ -58,7 +58,7 @@ typedef struct Player {
   int ping;
   int true_mmr;
   int wait_time; //time remaining
-  int total_wait_time;
+  int total_wait_time; //for statistics
   int wins; //games won
   int games; //games played
   int lenience;
@@ -138,12 +138,13 @@ int main(int argc, char ** argv) {
   MPI_Status  * stat_prev   = malloc(sizeof(MPI_Status)  * mpi_size);
   
   // setup statistics
-  double stat_time;
-  double stat_start_time;  
+  double stat_time = 0;
+  double stat_start_time = 0;
   float bucket_counts;
   int r_i; // all ranks index
   int b; // mmr_bucket
   
+  //Statistical gathering
   int *sum_counts = malloc(sizeof(int)*N_BUCKETS);
   int *counts = malloc(sizeof(int)*N_BUCKETS);
   int *all_counts = malloc(sizeof(int)*N_BUCKETS*mpi_size);
@@ -319,7 +320,7 @@ int main(int argc, char ** argv) {
             average_true_mmrs[b] /= bucket_counts;
             printf("%d %d\t%.2f\t%.2f\t%.2f\t%.2f\n", b, sum_counts[b], average_wait_times[b], average_winrates[b], average_mmrs[b], average_true_mmrs[b]);
           }
-          stat_time = GetTimeBase() - stat_start_time;
+          stat_time = (GetTimeBase() - stat_start_time) / g_processor_frequency;
           printf("gather record time:\t%012.6f\n", stat_time);
         }
       }
@@ -541,7 +542,6 @@ void sort_players(Player * arr, int low, int high) {
 
 int matchable(Player a, Player b) {
   if(a.wait_time < 0 && b.wait_time < 0) {
-    //printf("leniences: %d, %d\n", a.lenience, b.lenience);
     return ((a.lenience + b.lenience)/10.0 > (MM_CONST * abs(a.mmr - b.mmr) + PING_CONST * (a.ping + b.ping)));
   }
   return 0;

@@ -1,19 +1,12 @@
 # Parallel-Matchmaking
 RPI Parallel Programming Spring 2019 Final Project
 
-(Temporary link to writeup)
-https://www.overleaf.com/project/5cb8f8a6c16dba589acd63ad
-
-TODOS:
-
-Make the code pretty (and test again)
-
-///BELOW HERE this is the actual readme we will be submitting
-
 Contributers:
 David May, Thomas Clarke, Kousuke Tachida
 
 David May contributed general algorithm along with mmr systems implementation. He also wrote sections of the paper on the mmr systems and the algorithm.
+
+KRATOS CODE PROVIDED BY David May (mayd2)
 
 Thomas Clarke contributed research into algorithms, contributed majorly to the research paper, and ran majority of BGQ tests.
 
