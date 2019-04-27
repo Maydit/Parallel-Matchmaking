@@ -1,6 +1,8 @@
 # Parallel-Matchmaking
 RPI Parallel Programming Spring 2019 Final Project
 
+[Formal writeup here](./writeup.pdf)
+
 Contributers:
 David May, Thomas Clarke, Kousuke Tachida
 
