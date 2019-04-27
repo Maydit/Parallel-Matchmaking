@@ -6,8 +6,6 @@ David May, Thomas Clarke, Kousuke Tachida
 
 David May contributed general algorithm along with mmr systems implementation. He also wrote sections of the paper on the mmr systems and the algorithm.
 
-KRATOS CODE PROVIDED BY David May (mayd2)
-
 Thomas Clarke contributed research into algorithms, contributed majorly to the research paper, and ran majority of BGQ tests.
 
 Kousuke Tachida contributed to the statistics collection along with creating the graphs for the paper.
